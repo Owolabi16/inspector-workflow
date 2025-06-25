@@ -563,24 +563,59 @@ jobs:
           
           echo "lambda_function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
 
+      # - name: Push Secure Image to ECR (Only if Inspector Scan Passes)
+      #   run: |
+      #     if [[ "${{ steps.inspector_scan.outcome }}" == "success" ]]; then
+      #       echo " AWS Inspector scan passed, pushing secure image to ECR"
+      #       REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+      #       REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
+      #       IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+            
+      #       docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
+      #       docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+            
+      #       echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+      #     else
+      #       echo " AWS Inspector scan failed - blocking image push to ECR"
+      #       echo "Review the security findings before proceeding.."
+      #       echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
+      #       exit 1
+      #     fi
+
       - name: Push Secure Image to ECR (Only if Inspector Scan Passes)
         run: |
+          echo "🔍 Debug Information:"
+          echo "Inspector scan outcome: ${{ steps.inspector_scan.outcome }}"
+          echo "Final image output: '${{ steps.final.outputs.image }}'"
+          echo "Available local images:"
+          docker images | grep "${{ inputs.service_name }}"
+          
           if [[ "${{ steps.inspector_scan.outcome }}" == "success" ]]; then
-            echo " AWS Inspector scan passed, pushing secure image to ECR"
+            echo "✅ AWS Inspector scan passed, pushing secure image to ECR"
             REGISTRY="${{ steps.login-ecr.outputs.registry }}"
             REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
             IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
             
-            docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
-            docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-            
-            echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+            # Check if final image exists
+            if [[ -n "${{ steps.final.outputs.image }}" ]]; then
+              echo "📦 Tagging image: ${{ steps.final.outputs.image }} → $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+              docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
+              docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+              echo "🚀 Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+            else
+              echo "❌ Final image output is empty, using base image instead"
+              BASE_IMAGE="$REGISTRY/$REPOSITORY:$IMAGE_TAG-patch"
+              echo "📦 Tagging image: $BASE_IMAGE → $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+              docker tag $BASE_IMAGE $REGISTRY/$REPOSITORY:$IMAGE_TAG
+              docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+              echo "🚀 Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+            fi
           else
-            echo " AWS Inspector scan failed - blocking image push to ECR"
-            echo "Review the security findings before proceeding.."
+            echo "❌ AWS Inspector scan failed - blocking image push to ECR"
+            echo "Review the security findings before proceeding"
             echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
             exit 1
-          fi
+          fi      
 
       # - name: Slack Status Notifier
       #   if: always()
