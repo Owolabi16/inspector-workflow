@@ -317,15 +317,15 @@ jobs:
           # Use the base image that we know exists
           SCAN_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}:${{ steps.vars.outputs.image_tag }}-patch"
           
-          echo "🔍 Checking if scan image exists: $SCAN_IMAGE"
+          echo " Checking if scan image exists: $SCAN_IMAGE"
           if docker image inspect "$SCAN_IMAGE" >/dev/null 2>&1; then
-            echo "✅ Scan image found"
+            echo " Scan image found"
             docker save "$SCAN_IMAGE" -o ./container-image.tar
             ls -la ./container-image.tar
             echo "scan_image=$SCAN_IMAGE" >> $GITHUB_OUTPUT
-            echo "✅ Image prepared for scanning"
+            echo " Image prepared for scanning"
           else
-            echo "❌ Scan image not found, available images:"
+            echo " Scan image not found, available images:"
             docker images | grep "${{ inputs.service_name }}" || echo "No matching images"
             exit 1
           fi        
