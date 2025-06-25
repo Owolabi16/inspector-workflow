@@ -4,13 +4,13 @@ on:
       aws-github-oidc-iam-role:
         required: true
       slack_webhook_url:
-        required: true
+        required: false
       npm_token:
-        required: true
+        required: false
       tfc_token:
-        required: true
+        required: false
       sentry_auth_token:
-        required: true
+        required: false
       github-token:
         required: true
       lambda_deployment_role:

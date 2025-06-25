@@ -1,0 +1,37 @@
+name: Deploy Test Service
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/action.yml
+    secrets:
+      aws-github-oidc-iam-role: ${{ secrets.AWS_GITHUB_OIDC_IAM_ROLE }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      lambda_deployment_role: ${{ secrets.LAMBDA_DEPLOYMENT_ROLE }}
+      sbom_bucket_name: ${{ secrets.SBOM_BUCKET_NAME }}
+      # slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # npm_token: ${{ secrets.NPM_TOKEN }}
+      # tfc_token: ${{ secrets.TFC_TOKEN }}
+      # sentry_auth_token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+    with:
+      environment: "staging"
+      service_name: "security-test-app"
+      organization: "occasio"
+      enable_tf: "false"
+      enable_ingress: true
+      enable_status_cake: false
+      replicas: "1"
+      hpa_max_replicas: "2"
+      memory_limit: "256Mi"
+      cpu_limit: "200m"
+      app_url: "security-test.your-domain.com"
+      k8_ingress_url: "security-test-staging"
+      health_check_path: "/health"
+      enable_secure_scan: true
+      enable_critical_only_alerts: true
+      sbom_bucket_name: ${{ secrets.SBOM_BUCKET_NAME }}
+      alert_topic_arn: ${{ secrets.ALERT_TOPIC_ARN }}
