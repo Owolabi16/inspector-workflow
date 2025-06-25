@@ -236,6 +236,7 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
         env:
           GITLEAKS_CONFIG: ${{ runner.temp }}/security/gitleaks/gitleaks.toml
+
       - name: Upload Gitleaks Artifact
         uses: actions/upload-artifact@v4
         if: ${{ inputs.enable_secure_scan }}
@@ -425,7 +426,7 @@ jobs:
           wkhtmltopdf --page-size A4 sbom_report.html "${PDF_NAME}"
           
           echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
-          echo "✅ SBOM PDF generated: ${PDF_NAME}"        
+          echo " SBOM PDF generated: ${PDF_NAME}"        
 
 
       - name: Upload SBOM and PDF to S3
@@ -563,59 +564,27 @@ jobs:
           
           echo "lambda_function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
 
-      # - name: Push Secure Image to ECR (Only if Inspector Scan Passes)
-      #   run: |
-      #     if [[ "${{ steps.inspector_scan.outcome }}" == "success" ]]; then
-      #       echo " AWS Inspector scan passed, pushing secure image to ECR"
-      #       REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-      #       REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
-      #       IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
-            
-      #       docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
-      #       docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-            
-      #       echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
-      #     else
-      #       echo " AWS Inspector scan failed - blocking image push to ECR"
-      #       echo "Review the security findings before proceeding.."
-      #       echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
-      #       exit 1
-      #     fi
-
-      - name: Push Secure Image to ECR (Only if Inspector Scan Passes)
+      - name: Push Secure Image to ECR
+        if: ${{ steps.inspector_scan.outcome == 'success' }}
         run: |
-          echo "🔍 Debug Information:"
-          echo "Inspector scan outcome: ${{ steps.inspector_scan.outcome }}"
-          echo "Final image output: '${{ steps.final.outputs.image }}'"
-          echo "Available local images:"
-          docker images | grep "${{ inputs.service_name }}"
+          echo " AWS Inspector scan passed, pushing secure image to ECR"
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
+          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+          BASE_IMAGE="$REGISTRY/$REPOSITORY:$IMAGE_TAG-patch"
           
-          if [[ "${{ steps.inspector_scan.outcome }}" == "success" ]]; then
-            echo "✅ AWS Inspector scan passed, pushing secure image to ECR"
-            REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-            REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
-            IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
-            
-            # Check if final image exists
-            if [[ -n "${{ steps.final.outputs.image }}" ]]; then
-              echo "📦 Tagging image: ${{ steps.final.outputs.image }} → $REGISTRY/$REPOSITORY:$IMAGE_TAG"
-              docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
-              docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-              echo "🚀 Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
-            else
-              echo "❌ Final image output is empty, using base image instead"
-              BASE_IMAGE="$REGISTRY/$REPOSITORY:$IMAGE_TAG-patch"
-              echo "📦 Tagging image: $BASE_IMAGE → $REGISTRY/$REPOSITORY:$IMAGE_TAG"
-              docker tag $BASE_IMAGE $REGISTRY/$REPOSITORY:$IMAGE_TAG
-              docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-              echo "🚀 Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
-            fi
-          else
-            echo "❌ AWS Inspector scan failed - blocking image push to ECR"
-            echo "Review the security findings before proceeding"
-            echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
-            exit 1
-          fi      
+          docker tag $BASE_IMAGE $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          
+          echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+
+      - name: Block Push if Security Scan Failed
+        if: ${{ steps.inspector_scan.outcome != 'success' }}
+        run: |
+          echo " AWS Inspector scan failed - blocking image push to ECR"
+          echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
+          echo "Review the security findings before proceeding"
+          exit 1   
 
       # - name: Slack Status Notifier
       #   if: always()
@@ -761,17 +730,17 @@ jobs:
             kubectl rollout status deployment/${{ inputs.service_name }}-${{ inputs.environment }}-cron
           fi
 
-      # - name: Slack Status Notifier
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #   if: always()
-      #   uses: ravsamhq/notify-slack-action@v2
-      #   with:
-      #     status: ${{ job.status }}
-      #     notify_when: "failure"
-      #     notification_title: '{repo}, {workflow}: {status_message}'
-      #     message_format: '{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>'
-      #     footer: 'Repo <{repo_url}|{repo}> | <{run_url}|View Run>'
+      - name: Slack Status Notifier
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: "failure"
+          notification_title: '{repo}, {workflow}: {status_message}'
+          message_format: '{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>'
+          footer: 'Repo <{repo_url}|{repo}> | <{run_url}|View Run>'
 
 
   sentry-release:
@@ -804,13 +773,13 @@ jobs:
           git tag $ENVIRONMENT-$DEPLOY_TAG
           git push origin $ENVIRONMENT-$DEPLOY_TAG
 
-      # - name: Slack Status Notifier
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #   if: always()
-      #   uses: ravsamhq/notify-slack-action@v2
-      #   with:
-      #     status: ${{ job.status }}
-      #     notification_title: 'Deployment {status_message} for <{repo_url}|{repo}>, ${{ inputs.environment }}'
-      #     message_format: '{emoji}, Branch: <{branch_url}|{branch}>, External URL: ${{ inputs.app_url }} Internal k8s URL: ${{ inputs.service_name }}-${{ inputs.environment }}.default.svc.cluster.local'
-      #     footer: 'Author: ${{ github.event.head_commit.author.name }} | <{run_url}|View Pipeline>'
+      - name: Slack Status Notifier
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notification_title: 'Deployment {status_message} for <{repo_url}|{repo}>, ${{ inputs.environment }}'
+          message_format: '{emoji}, Branch: <{branch_url}|{branch}>, External URL: ${{ inputs.app_url }} Internal k8s URL: ${{ inputs.service_name }}-${{ inputs.environment }}.default.svc.cluster.local'
+          footer: 'Author: ${{ github.event.head_commit.author.name }} | <{run_url}|View Pipeline>'
