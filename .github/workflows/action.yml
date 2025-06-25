@@ -353,7 +353,7 @@ jobs:
           chmod +x cyclonedx
           sudo mv cyclonedx /usr/local/bin/
 
-      - name: Convert SBOM to PDF using CycloneDX
+      - name: Convert SBOM to PDF using Python
         if: ${{ inputs.enable_secure_scan && steps.inspector_scan.outcome == 'success' }}
         id: sbom_pdf
         run: |
@@ -361,60 +361,126 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d-%H%M)
           PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
           
-          # Install CycloneDX CLI and wkhtmltopdf
-          curl -sSfL https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.24.2/cyclonedx-linux-x64 -o cyclonedx
-          chmod +x cyclonedx
-          sudo mv cyclonedx /usr/local/bin/
-          
-          sudo apt-get update && sudo apt-get install -y wkhtmltopdf
-          
-          # Convert SBOM JSON to XML first (required for some converters)
-          cyclonedx convert --input-file ./sbom_output.json --output-format xml --output-file sbom.xml
-          
-          # Create enhanced HTML report with better styling
-          cat > sbom_report.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>SBOM Security Report - ${{ inputs.service_name }}</title>
-              <style>
-                  body { font-family: Arial, sans-serif; margin: 20px; }
-                  .header { background: #f0f0f0; padding: 20px; border-radius: 5px; }
-                  .section { margin: 20px 0; }
-                  .critical { color: #d73502; font-weight: bold; }
-                  .high { color: #ff8c00; }
-                  .medium { color: #ffd700; }
-                  .low { color: #90ee90; }
-                  pre { background: #f5f5f5; padding: 10px; border-radius: 3px; }
-              </style>
-          </head>
-          <body>
-              <div class="header">
-                  <h1> Software Bill of Materials Security Report</h1>
-                  <h2>Service: ${{ inputs.service_name }}-${{ inputs.environment }}</h2>
-                  <h3> Image: ${{ steps.final.outputs.image }}</h3>
-                  <h3> Generated: $(date)</h3>
-                  <h3> Version: ${SHORT_SHA}</h3>
-              </div>
-              
-              <div class="section">
-                  <h2> SBOM Contents</h2>
-                  <pre>$(cat sbom_output.json | jq . 2>/dev/null || cat sbom_output.json)</pre>
-              </div>
-              
-              <div class="section">
-                  <h2> Security Scan Results</h2>
-                  <pre>$(cat inspector_scan_output.json | jq . 2>/dev/null || cat inspector_scan_output.json)</pre>
-              </div>
-          </body>
-          </html>
-          EOF
-          
-          # Convert HTML to PDF
-          wkhtmltopdf --page-size A4 sbom_report.html "${PDF_NAME}"
-          
-          echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
-          echo " SBOM PDF generated: ${PDF_NAME}"
+          # Create Python script for HTML generation
+          cat > generate_report.py << 'PYTHON_SCRIPT'
+        import json
+        import html
+        from datetime import datetime
+        import os
+
+        def read_json_file(filename):
+            try:
+                with open(filename, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error reading {filename}: {e}")
+                return {"error": f"Could not read {filename}"}
+
+        # Read SBOM and scan data
+        sbom_data = read_json_file('./sbom_output.json')
+        scan_data = read_json_file('./inspector_scan_output.json')
+
+        # Count components
+        component_count = len(sbom_data.get('components', []))
+        findings_count = len(scan_data.get('findings', []))
+
+        # Create HTML content
+        html_content = f"""<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Security Report - {os.environ.get('SERVICE_NAME', 'Unknown')}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }}
+                .header {{ background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 2px solid #4a90e2; }}
+                .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
+                .metadata {{ display: grid; grid-template-columns: 120px 1fr; gap: 10px; margin-bottom: 15px; }}
+                .metadata-label {{ font-weight: bold; color: #333; }}
+                .metadata-value {{ color: #666; word-break: break-all; }}
+                .summary-box {{ background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+                .json-content {{ 
+                    background: #f8f8f8; 
+                    padding: 15px; 
+                    border-radius: 5px; 
+                    font-family: 'Courier New', monospace; 
+                    font-size: 10px; 
+                    white-space: pre-wrap; 
+                    max-height: 300px; 
+                    overflow-y: auto; 
+                    border: 1px solid #ddd;
+                }}
+                h1 {{ color: #2c3e50; margin: 0; }}
+                h2 {{ color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 5px; }}
+                .status-ok {{ color: #27ae60; font-weight: bold; }}
+                .status-warning {{ color: #f39c12; font-weight: bold; }}
+                .status-error {{ color: #e74c3c; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🔒 Security Analysis Report</h1>
+                <div class="metadata">
+                    <div class="metadata-label">Service:</div>
+                    <div class="metadata-value">{os.environ.get('SERVICE_NAME', 'Unknown')}-{os.environ.get('ENVIRONMENT', 'Unknown')}</div>
+                    <div class="metadata-label">Generated:</div>
+                    <div class="metadata-value">{datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</div>
+                    <div class="metadata-label">Version:</div>
+                    <div class="metadata-value">{os.environ.get('SHORT_SHA', 'Unknown')}</div>
+                    <div class="metadata-label">Pipeline:</div>
+                    <div class="metadata-value">GitHub Actions Security Scan</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📊 Executive Summary</h2>
+                <div class="summary-box">
+                    <strong>Components Analyzed:</strong> {component_count}<br>
+                    <strong>Security Findings:</strong> {findings_count}<br>
+                    <strong>SBOM Version:</strong> {sbom_data.get('specVersion', 'Unknown')}<br>
+                    <strong>Scan Status:</strong> <span class="status-ok">✅ Completed</span>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📋 Software Bill of Materials (SBOM)</h2>
+                <div class="json-content">{json.dumps(sbom_data, indent=2)}</div>
+            </div>
+            
+            <div class="section">
+                <h2>🛡️ Security Scan Results</h2>
+                <div class="json-content">{json.dumps(scan_data, indent=2)}</div>
+            </div>
+            
+            <div class="section">
+                <h2>📋 Report Details</h2>
+                <div class="summary-box">
+                    <strong>Scanner:</strong> AWS Inspector v2<br>
+                    <strong>SBOM Generator:</strong> Amazon Inspector SBOM Generator<br>
+                    <strong>Report Format:</strong> PDF<br>
+                    <strong>Generated By:</strong> Automated Security Pipeline
+                </div>
+            </div>
+        </body>
+        </html>"""
+
+        # Write HTML file
+        with open('sbom_report.html', 'w') as f:
+            f.write(html_content)
+
+        print("✅ HTML report generated successfully")
+        PYTHON_SCRIPT
+            
+            # Run Python script with environment variables
+            python3 generate_report.py
+            env:
+              SERVICE_NAME: ${{ inputs.service_name }}
+              ENVIRONMENT: ${{ inputs.environment }}
+              SHORT_SHA: ${SHORT_SHA}
+            
+            # Convert HTML to PDF
+            wkhtmltopdf --page-size A4 --orientation Portrait --margin-top 20mm --margin-bottom 20mm sbom_report.html "${PDF_NAME}"
+            
+            echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+            echo "✅ SBOM PDF generated: ${PDF_NAME}"
 
       - name: Upload SBOM and PDF to S3
         if: ${{ inputs.enable_secure_scan && inputs.s3_sbom_bucket && steps.inspector_scan.outcome == 'success' }}
