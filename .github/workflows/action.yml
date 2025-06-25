@@ -363,79 +363,79 @@ jobs:
           
           # Create Python script for HTML generation
           cat > generate_report.py << 'PYTHON_SCRIPT'
-      import json
-      import html
-      from datetime import datetime
-      import os
+import json
+import html
+from datetime import datetime
+import os
 
-      def read_json_file(filename):
-          try:
-              with open(filename, 'r') as f:
-                  return json.load(f)
-          except Exception as e:
-              print(f"Error reading {filename}: {e}")
-              return {"error": f"Could not read {filename}"}
+def read_json_file(filename):
+    try:
+        with open(filename, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading {filename}: {e}")
+        return {"error": f"Could not read {filename}"}
 
-      # Read SBOM and scan data
-      sbom_data = read_json_file('./sbom_output.json')
-      scan_data = read_json_file('./inspector_scan_output.json')
+# Read SBOM and scan data
+sbom_data = read_json_file('./sbom_output.json')
+scan_data = read_json_file('./inspector_scan_output.json')
 
-      # Count components
-      component_count = len(sbom_data.get('components', []))
-      findings_count = len(scan_data.get('findings', []))
+# Count components
+component_count = len(sbom_data.get('components', []))
+findings_count = len(scan_data.get('findings', []))
 
-      # Create HTML content
-      html_content = f"""<!DOCTYPE html>
-      <html>
-      <head>
-          <title>Security Report - {os.environ.get('SERVICE_NAME', 'Unknown')}</title>
-          <style>
-              body {{ font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }}
-              .header {{ background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
-              .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
-              .json-content {{ background: #f8f8f8; padding: 15px; border-radius: 5px; font-family: monospace; font-size: 10px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }}
-              h1 {{ color: #2c3e50; }}
-              h2 {{ color: #34495e; }}
-          </style>
-      </head>
-      <body>
-          <div class="header">
-              <h1>🔒 Security Analysis Report</h1>
-              <p><strong>Service:</strong> {os.environ.get('SERVICE_NAME', 'Unknown')}-{os.environ.get('ENVIRONMENT', 'Unknown')}</p>
-              <p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-              <p><strong>Components:</strong> {component_count} | <strong>Findings:</strong> {findings_count}</p>
-          </div>
-          
-          <div class="section">
-              <h2>📋 Software Bill of Materials</h2>
-              <div class="json-content">{json.dumps(sbom_data, indent=2)}</div>
-          </div>
-          
-          <div class="section">
-              <h2>🛡️ Security Scan Results</h2>
-              <div class="json-content">{json.dumps(scan_data, indent=2)}</div>
-          </div>
-      </body>
-      </html>"""
+# Create HTML content
+html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Security Report - {os.environ.get('SERVICE_NAME', 'Unknown')}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }}
+        .header {{ background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
+        .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
+        .json-content {{ background: #f8f8f8; padding: 15px; border-radius: 5px; font-family: monospace; font-size: 10px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }}
+        h1 {{ color: #2c3e50; }}
+        h2 {{ color: #34495e; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔒 Security Analysis Report</h1>
+        <p><strong>Service:</strong> {os.environ.get('SERVICE_NAME', 'Unknown')}-{os.environ.get('ENVIRONMENT', 'Unknown')}</p>
+        <p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+        <p><strong>Components:</strong> {component_count} | <strong>Findings:</strong> {findings_count}</p>
+    </div>
+    
+    <div class="section">
+        <h2>📋 Software Bill of Materials</h2>
+        <div class="json-content">{json.dumps(sbom_data, indent=2)}</div>
+    </div>
+    
+    <div class="section">
+        <h2>🛡️ Security Scan Results</h2>
+        <div class="json-content">{json.dumps(scan_data, indent=2)}</div>
+    </div>
+</body>
+</html>"""
 
-      # Write HTML file
-      with open('sbom_report.html', 'w') as f:
-          f.write(html_content)
+# Write HTML file
+with open('sbom_report.html', 'w') as f:
+    f.write(html_content)
 
-      print("✅ HTML report generated successfully")
-      PYTHON_SCRIPT
-          
-          # Run Python script with environment variables
-          SERVICE_NAME="${{ inputs.service_name }}" \
-          ENVIRONMENT="${{ inputs.environment }}" \
-          SHORT_SHA="${SHORT_SHA}" \
-          python3 generate_report.py
-          
-          # Convert HTML to PDF
-          wkhtmltopdf --page-size A4 --orientation Portrait sbom_report.html "${PDF_NAME}"
-          
-          echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
-          echo "✅ SBOM PDF generated: ${PDF_NAME}"          
+print("✅ HTML report generated successfully")
+PYTHON_SCRIPT
+    
+    # Run Python script with environment variables
+    SERVICE_NAME="${{ inputs.service_name }}" \
+    ENVIRONMENT="${{ inputs.environment }}" \
+    SHORT_SHA="${SHORT_SHA}" \
+    python3 generate_report.py
+    
+    # Convert HTML to PDF
+    wkhtmltopdf --page-size A4 --orientation Portrait sbom_report.html "${PDF_NAME}"
+    
+    echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+    echo "✅ SBOM PDF generated: ${PDF_NAME}"          
 
 
       - name: Upload SBOM and PDF to S3
