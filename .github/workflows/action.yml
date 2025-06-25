@@ -323,12 +323,19 @@ jobs:
           ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
           TAG: ${{ steps.vars.outputs.image_tag }}
 
+      - name: Save Final Image as Tarball for Inspector Scan
+        run: |
+          echo "Saving final image for security scan: ${{ steps.final.outputs.image }}"
+          docker save ${{ steps.final.outputs.image }} -o ./container-image.tar
+          ls -la ./container-image.tar
+          echo "Image saved as tarball for local scanning"          
+
       - name: Scan with AWS Inspector and Generate SBOM
         id: inspector_scan
         uses: aws-actions/vulnerability-scan-github-action-for-amazon-inspector@v1
         with:
           artifact_type: container
-          artifact_path: ${{ steps.final.outputs.image }}
+          artifact_path: ./container-image.tar 
           critical_threshold: 1
           high_threshold: 1
           medium_threshold: 1
@@ -346,53 +353,92 @@ jobs:
           chmod +x cyclonedx
           sudo mv cyclonedx /usr/local/bin/
 
-      - name: Convert SBOM to PDF
-        if: ${{ inputs.enable_secure_scan }}
+      - name: Convert SBOM to PDF using CycloneDX
+        if: ${{ inputs.enable_secure_scan && steps.inspector_scan.outcome == 'success' }}
         id: sbom_pdf
         run: |
-          # Convert SBOM JSON to PDF report
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d-%H%M)
           PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
           
-          # Generate HTML first, then convert to PDF (requires wkhtmltopdf)
+          # Install CycloneDX CLI and wkhtmltopdf
+          curl -sSfL https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.24.2/cyclonedx-linux-x64 -o cyclonedx
+          chmod +x cyclonedx
+          sudo mv cyclonedx /usr/local/bin/
+          
           sudo apt-get update && sudo apt-get install -y wkhtmltopdf
+          
+          # Convert SBOM JSON to XML first (required for some converters)
           cyclonedx convert --input-file ./sbom_output.json --output-format xml --output-file sbom.xml
           
-          # Create a simple HTML report
-          cat > sbom_report.html << EOF
+          # Create enhanced HTML report with better styling
+          cat > sbom_report.html << 'EOF'
           <!DOCTYPE html>
           <html>
-          <head><title>SBOM Report - ${{ inputs.service_name }}</title></head>
+          <head>
+              <title>SBOM Security Report - ${{ inputs.service_name }}</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 20px; }
+                  .header { background: #f0f0f0; padding: 20px; border-radius: 5px; }
+                  .section { margin: 20px 0; }
+                  .critical { color: #d73502; font-weight: bold; }
+                  .high { color: #ff8c00; }
+                  .medium { color: #ffd700; }
+                  .low { color: #90ee90; }
+                  pre { background: #f5f5f5; padding: 10px; border-radius: 3px; }
+              </style>
+          </head>
           <body>
-          <h1>Software Bill of Materials</h1>
-          <h2>Service: ${{ inputs.service_name }}-${{ inputs.environment }}</h2>
-          <h3>Image: ${{ steps.final.outputs.image }}</h3>
-          <h3>Generated: $(date)</h3>
-          <pre>$(cat sbom_output.json | jq .)</pre>
+              <div class="header">
+                  <h1> Software Bill of Materials Security Report</h1>
+                  <h2>Service: ${{ inputs.service_name }}-${{ inputs.environment }}</h2>
+                  <h3> Image: ${{ steps.final.outputs.image }}</h3>
+                  <h3> Generated: $(date)</h3>
+                  <h3> Version: ${SHORT_SHA}</h3>
+              </div>
+              
+              <div class="section">
+                  <h2> SBOM Contents</h2>
+                  <pre>$(cat sbom_output.json | jq . 2>/dev/null || cat sbom_output.json)</pre>
+              </div>
+              
+              <div class="section">
+                  <h2> Security Scan Results</h2>
+                  <pre>$(cat inspector_scan_output.json | jq . 2>/dev/null || cat inspector_scan_output.json)</pre>
+              </div>
           </body>
           </html>
           EOF
           
-          wkhtmltopdf sbom_report.html "${PDF_NAME}"
+          # Convert HTML to PDF
+          wkhtmltopdf --page-size A4 sbom_report.html "${PDF_NAME}"
+          
           echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+          echo " SBOM PDF generated: ${PDF_NAME}"
 
-      - name: Upload SBOM to S3
-        if: ${{ inputs.enable_secure_scan && inputs.s3_sbom_bucket }}
+      - name: Upload SBOM and PDF to S3
+        if: ${{ inputs.enable_secure_scan && inputs.s3_sbom_bucket && steps.inspector_scan.outcome == 'success' }}
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d-%H%M)
           
+          echo " Uploading security artifacts to S3..."
+          
           # Upload JSON SBOM
           aws s3 cp ./sbom_output.json s3://${{ inputs.s3_sbom_bucket }}/sboms/${{ inputs.service_name }}/${{ inputs.environment }}/sbom-${SHORT_SHA}-${TIMESTAMP}.json
+          echo " SBOM JSON uploaded"
           
-          # Upload PDF report if generated
+          # Upload PDF report
           if [ -f "${{ steps.sbom_pdf.outputs.pdf_name }}" ]; then
             aws s3 cp "${{ steps.sbom_pdf.outputs.pdf_name }}" s3://${{ inputs.s3_sbom_bucket }}/reports/${{ inputs.service_name }}/${{ inputs.environment }}/
+            echo " SBOM PDF uploaded: ${{ steps.sbom_pdf.outputs.pdf_name }}"
           fi
           
           # Upload Inspector scan results
           aws s3 cp ./inspector_scan_output.json s3://${{ inputs.s3_sbom_bucket }}/scans/${{ inputs.service_name }}/${{ inputs.environment }}/inspector-${SHORT_SHA}-${TIMESTAMP}.json
+          echo " Inspector scan results uploaded"
+          
+          echo " All security artifacts uploaded to S3"
 
       - name: Deploy Critical Findings Lambda
         if: ${{ inputs.enable_critical_only_alerts }}
@@ -505,14 +551,24 @@ jobs:
           
           echo "lambda_function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
 
-      - name: Build, Tag, and Push Docker Image to Amazon ECR
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: ${{ inputs.service_name }}-${{ inputs.environment }}
-          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+      - name: Push Secure Image to ECR (Only if Inspector Scan Passes)
         run: |
-          docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
-          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          if [[ "${{ steps.inspector_scan.outcome }}" == "success" ]]; then
+            echo " AWS Inspector scan passed, pushing secure image to ECR"
+            REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+            REPOSITORY="${{ inputs.service_name }}-${{ inputs.environment }}"
+            IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+            
+            docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
+            docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+            
+            echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          else
+            echo " AWS Inspector scan failed - blocking image push to ECR"
+            echo "Review the security findings before proceeding"
+            echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
+            exit 1
+          fi
 
       # - name: Slack Status Notifier
       #   if: always()
