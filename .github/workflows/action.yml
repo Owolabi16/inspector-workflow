@@ -565,7 +565,7 @@ jobs:
             echo " Secure image pushed: $REGISTRY/$REPOSITORY:$IMAGE_TAG"
           else
             echo " AWS Inspector scan failed - blocking image push to ECR"
-            echo "Review the security findings before proceeding"
+            echo "Review the security findings before proceeding.."
             echo "Scan outcome: ${{ steps.inspector_scan.outcome }}"
             exit 1
           fi
