@@ -1,0 +1,724 @@
+on:
+  workflow_call:
+    secrets:
+      aws-github-oidc-iam-role:
+        required: true
+      slack_webhook_url:
+        required: true
+      npm_token:
+        required: true
+      tfc_token:
+        required: true
+      sentry_auth_token:
+        required: true
+      github-token:
+        required: true
+      lambda_deployment_role:
+        required: false
+      sbom_bucket_name:
+        required: false
+    inputs:
+      environment:
+        description: Environment name Staging or Prod
+        required: true
+        type: string
+      service_name:
+        description: Name of Service 
+        required: true
+        type: string
+      organization:
+        description: Organization Name
+        required: true
+        type: string
+        default: "occasio"
+      cron:
+        description: Cron and API Service
+        default: "false"
+        type: string
+      enable_tf:
+        description: Enable / Disable Terraform Step
+        default: "true"
+        type: string
+      enable_ingress:
+        description: Enable / Disable Ingress for the Service
+        required: true
+        default: true
+        type: boolean
+      enable_status_cake:
+        description: Enable / Disable Status Cake Check
+        required: true
+        default: true
+        type: boolean
+      route53_zoneid:
+        description: Specific Zone for Route53 deployment
+        default: "Z0096696746Q0YA94CUQ"
+        type: string
+      replicas:
+        description: Number of Pods for the app
+        required: false
+        default: "1"
+        type: string
+      hpa_max_replicas:
+        description: Maximum Number of HPA Replicas
+        required: false
+        default: "2"
+        type: string
+      memory_limit:
+        description: Memory Allocation for Application
+        required: false
+        type: string
+      cpu_limit:
+        description: CPU Allocation for Application
+        required: false
+        type: string
+      cron_memory_limit:
+        description: Memory Allocation for Application
+        required: false
+        type: string
+      cron_cpu_limit:
+        description: CPU Allocation for Application
+        required: false
+        type: string
+      monitor_name:
+        description: Name for Status Cake Monitor
+        type: string
+      app_url:
+        description: Service Top-Level Domain Name
+        type: string
+      k8_ingress_url:
+        description: Kubernetes Ingress URL
+        type: string
+      ingress_group:
+        description: Specify a Unique Ingress Group
+        type: string
+      health_check_path:
+        description: Health Check and k8s Probe Path
+        type: string
+      hpa_enabled:
+        description: Enable/Disable HPA
+        default: true
+        type: boolean
+      services_allowed:
+        description: List of Services Allowed to Access the Service
+        required: false
+        type: string
+      enable_secure_scan:
+        description: Enable/Disable Secure Scan
+        default: true
+        required: false
+        type: boolean
+      burstable:
+        description: Enable/Disable Burstable Deployments
+        default: false
+        required: false
+        type: boolean
+      enable_sentry:
+        description: Enable/Disable Sentry Release
+        default: true
+        required: false
+        type: boolean
+      enable_critical_only_alerts:
+        description: Enable critical-only security alerts
+        default: true
+        required: false
+        type: boolean
+      s3_sbom_bucket:
+        description: S3 bucket for SBOM storage
+        required: false
+        type: string
+        default: "your-org-sbom-artifacts"
+      alert_topic_arn:
+        description: SNS topic ARN for security alerts
+        required: false
+        type: string        
+
+jobs:
+
+  validate-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Action Repo
+        uses: actions/checkout@v4
+        with:
+          repository: occasio/gh-actions
+          token: ${{ secrets.github-token }}
+
+      - name: Validate Inputs Temp Folder
+        run: |
+          mkdir -p ${{ runner.temp }}/scripts/
+          cp -r services/scripts/* ${{ runner.temp }}/scripts/
+
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Inputs
+        id: validate_inputs
+        run: bash ${{ runner.temp }}/scripts/validate_workflow_inputs.sh
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+          WORKFLOW_INPUTS: ${{ toJson(inputs) }}
+
+  infra-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: validate-inputs
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      dockerImageTag: ${{ steps.vars.outputs.image_tag }}      
+
+    steps:
+      - name: Clone Action Repo
+        uses: actions/checkout@v4
+        with:
+          repository: occasio/gh-actions
+          token: ${{ secrets.github-token }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+          cli_config_credentials_token: ${{ secrets.tfc_token }}
+
+      - name: Create WorkSpace
+        run: |
+          curl --http1.1 --header "Authorization: Bearer ${{ secrets.tfc_token }}" \
+            --http1.1 --header "Content-Type: application/vnd.api+json" \
+            --request POST \
+            --data "{ \"data\": { \"attributes\": { \"name\": \"${{ inputs.service_name }}-${{ inputs.environment }}\" }, \"type\": \"workspaces\" } }" \
+            https://app.terraform.io/api/v2/organizations/occasio/workspaces
+
+      - name: TF Workflow
+        if: ${{ inputs.enable_tf }} == "true"
+        id: tfworkflow
+        env:
+          ORGANIZATION: ${{ inputs.organization }}
+          TFC_WORKSPACE_PREFIX: ${{ inputs.service_name }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          TF_WORKSPACE: ${{ inputs.environment }}
+        run: |
+          if [[ "${{inputs.enable_tf}}" == "true" ]]; then
+            cd services/tf
+            sed "s/{tf-svc-name}/${{ inputs.service_name }}/g" backend.tf > backend-new.tf
+            sed 's/{service_name}/${{ inputs.service_name }}/g; s/{k8_ingress_url}/${{ inputs.k8_ingress_url }}/g; s/{route53_zoneid}/${{ inputs.route53_zoneid }}/g; s/{enable_status_cake}/${{ inputs.enable_status_cake }}/g; s/{monitor_name}/${{ inputs.monitor_name }}/g; s/{app_url}/${{ inputs.app_url }}/g; s/{enable_ingress}/${{ inputs.enable_ingress }}/g; s/{environment}/${{ inputs.environment }}/g; s/{health_check_path}/${{ inputs.health_check_path }}/g; s/{enable_sentry}/${{ inputs.enable_sentry }}/g;' values.auto.tfvars > vals.auto.tfvars
+            rm -rf backend.tf values.auto.tfvars
+            cat vals.auto.tfvars
+            terraform fmt -check
+            terraform init
+            terraform apply -auto-approve
+          fi
+          exit 0
+
+      - name: Gitleaks Temp Folder
+        if: ${{ inputs.enable_secure_scan }}
+        run: |
+          mkdir -p ${{ runner.temp }}/security/gitleaks
+          cp -r services/security/* ${{ runner.temp }}/security/gitleaks
+
+      - name: Code Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        if: ${{ inputs.enable_secure_scan }}
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz | tar -xz
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          bash gitleaks.sh
+        working-directory: ${{ runner.temp }}/security/gitleaks
+
+      - name: Run Gitleaks Scan
+        id: gitleaks
+        if: ${{ inputs.enable_secure_scan }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          set +e
+          gitleaks detect --source . --verbose --redact > gitleaks_output_${SHORT_SHA}.txt
+          EXIT_CODE=$?
+          set -e
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+        env:
+          GITLEAKS_CONFIG: ${{ runner.temp }}/security/gitleaks/gitleaks.toml
+      - name: Upload Gitleaks Artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ inputs.enable_secure_scan }}
+        with:
+          name: gitleaks-report
+          path: gitleaks_output_${{ steps.gitleaks.outputs.short_sha }}.txt
+
+      - name: Fail job if secrets detected
+        if: ${{ inputs.enable_secure_scan && steps.gitleaks.outputs.exit_code != 0 }}
+        run: |
+          echo "Please check the Gitleaks report for secrets detected in commit history"
+          echo "Report found here: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+          exit 1
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws-github-oidc-iam-role }}
+          role-session-name: GhActionRoleSession
+          aws-region: eu-west-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deployed Image Tag Generator
+        id: vars
+        run: |
+          commit_short_sha="$(git rev-parse --short HEAD)"
+          NEW_TAG="${{ github.run_id}}-${{ github.run_attempt}}-${commit_short_sha}"
+          echo "image_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Build base image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: $ECR_URI:$TAG-patch
+          build-args: |
+            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
+        env:
+          ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
+          TAG: ${{ steps.vars.outputs.image_tag }}
+
+      - name: Trivy scan base image
+        id: trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: $ECR_URI:$TAG-patch
+          scan-type: image
+          format: json
+          output: trivy-report.json
+          vuln-type: os
+          ignore-unfixed: true
+        env:
+          ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
+          TAG: ${{ steps.vars.outputs.image_tag }}
+
+      - name: Count CRITICAL vulns
+        id: vulns
+        run: |
+          CRIT=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-report.json)
+          echo "crit=$CRIT" >> $GITHUB_OUTPUT
+
+      - name: Patch with Copacetic
+        if: steps.vulns.outputs.crit != '0'
+        id: copa
+        uses: project-copacetic/copa-action@v1.2.1
+        with:
+          image:        $ECR_URI:$TAG
+          image-report: trivy-report.json
+          patched-tag:  $TAG-patched
+        env:
+          ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
+          TAG: ${{ steps.vars.outputs.image_tag }}
+
+      - name: Select final image tag
+        id: final
+        run: |
+          if [[ "${{ steps.vulns.outputs.crit }}" != "0" && "${{ steps.copa.conclusion }}" == "success" ]]; then
+            echo "image=${{ steps.copa.outputs.patched-image }}" >> $GITHUB_OUTPUT
+          else
+            echo "image=${{ env.ECR_URI }}:${{ env.TAG }}" >> $GITHUB_OUTPUT
+          fi
+        env:
+          ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
+          TAG: ${{ steps.vars.outputs.image_tag }}
+
+      - name: Scan with AWS Inspector and Generate SBOM
+        id: inspector_scan
+        uses: aws-actions/vulnerability-scan-github-action-for-amazon-inspector@v1
+        with:
+          artifact_type: container
+          artifact_path: ${{ steps.final.outputs.image }}
+          critical_threshold: 1
+          high_threshold: 1
+          medium_threshold: 1
+          low_threshold: 1
+          other_threshold: 1
+          display_vulnerability_findings: enabled
+          output_sbom_path: ./sbom_output.json
+          output_inspector_scan_path: ./inspector_scan_output.json
+
+      - name: Install SBOM to PDF Converter
+        if: ${{ inputs.enable_secure_scan }}
+        run: |
+          # Install cyclone-dx CLI for SBOM processing
+          curl -sSfL https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.24.2/cyclonedx-linux-x64 -o cyclonedx
+          chmod +x cyclonedx
+          sudo mv cyclonedx /usr/local/bin/
+
+      - name: Convert SBOM to PDF
+        if: ${{ inputs.enable_secure_scan }}
+        id: sbom_pdf
+        run: |
+          # Convert SBOM JSON to PDF report
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d-%H%M)
+          PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
+          
+          # Generate HTML first, then convert to PDF (requires wkhtmltopdf)
+          sudo apt-get update && sudo apt-get install -y wkhtmltopdf
+          cyclonedx convert --input-file ./sbom_output.json --output-format xml --output-file sbom.xml
+          
+          # Create a simple HTML report
+          cat > sbom_report.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head><title>SBOM Report - ${{ inputs.service_name }}</title></head>
+          <body>
+          <h1>Software Bill of Materials</h1>
+          <h2>Service: ${{ inputs.service_name }}-${{ inputs.environment }}</h2>
+          <h3>Image: ${{ steps.final.outputs.image }}</h3>
+          <h3>Generated: $(date)</h3>
+          <pre>$(cat sbom_output.json | jq .)</pre>
+          </body>
+          </html>
+          EOF
+          
+          wkhtmltopdf sbom_report.html "${PDF_NAME}"
+          echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload SBOM to S3
+        if: ${{ inputs.enable_secure_scan && inputs.s3_sbom_bucket }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d-%H%M)
+          
+          # Upload JSON SBOM
+          aws s3 cp ./sbom_output.json s3://${{ inputs.s3_sbom_bucket }}/sboms/${{ inputs.service_name }}/${{ inputs.environment }}/sbom-${SHORT_SHA}-${TIMESTAMP}.json
+          
+          # Upload PDF report if generated
+          if [ -f "${{ steps.sbom_pdf.outputs.pdf_name }}" ]; then
+            aws s3 cp "${{ steps.sbom_pdf.outputs.pdf_name }}" s3://${{ inputs.s3_sbom_bucket }}/reports/${{ inputs.service_name }}/${{ inputs.environment }}/
+          fi
+          
+          # Upload Inspector scan results
+          aws s3 cp ./inspector_scan_output.json s3://${{ inputs.s3_sbom_bucket }}/scans/${{ inputs.service_name }}/${{ inputs.environment }}/inspector-${SHORT_SHA}-${TIMESTAMP}.json
+
+      - name: Deploy Critical Findings Lambda
+        if: ${{ inputs.enable_critical_only_alerts }}
+        id: deploy_lambda
+        run: |
+          # Create Lambda function code
+          cat > lambda_function.py << 'EOF'
+          import boto3
+          import os
+          import json
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          INSPECTOR = boto3.client("inspector2")
+          SNS = boto3.client("sns")
+          TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN")
+
+          def lambda_handler(event, context):
+              try:
+                  # Handle both direct finding ARNs and EventBridge events
+                  finding_arns = []
+                  
+                  if "detail" in event and "finding" in event["detail"]:
+                      # EventBridge format
+                      finding_arns = [event["detail"]["finding"]["findingArn"]]
+                  elif "finding_arns" in event:
+                      # Direct format
+                      finding_arns = event["finding_arns"]
+                  elif isinstance(event, list):
+                      # List of ARNs
+                      finding_arns = event
+                      
+                  if not finding_arns:
+                      logger.info("No finding ARNs found in event")
+                      return {"statusCode": 200, "body": "No findings to process"}
+                      
+                  critical_findings = []
+                  
+                  for arn in finding_arns:
+                      try:
+                          response = INSPECTOR.get_findings(findingArns=[arn])
+                          for finding in response.get("findings", []):
+                              if finding.get("severity") == "CRITICAL":
+                                  critical_findings.append({
+                                      "arn": finding.get("findingArn"),
+                                      "title": finding.get("title"),
+                                      "description": finding.get("description"),
+                                      "severity": finding.get("severity"),
+                                      "service": finding.get("service"),
+                                      "resources": finding.get("resources", [])
+                                  })
+                      except Exception as e:
+                          logger.error(f"Error processing finding {arn}: {str(e)}")
+                          
+                  if critical_findings and TOPIC_ARN:
+                      message = {
+                          "alert_type": "critical_security_findings",
+                          "service": "${{ inputs.service_name }}",
+                          "environment": "${{ inputs.environment }}",
+                          "finding_count": len(critical_findings),
+                          "findings": critical_findings
+                      }
+                      
+                      SNS.publish(
+                          TopicArn=TOPIC_ARN,
+                          Subject=f" {len(critical_findings)} CRITICAL security findings - ${{ inputs.service_name }}",
+                          Message=json.dumps(message, indent=2, default=str)
+                      )
+                      
+                      logger.info(f"Published {len(critical_findings)} critical findings to SNS")
+                  
+                  return {
+                      "statusCode": 200,
+                      "body": json.dumps({
+                          "processed_findings": len(finding_arns),
+                          "critical_findings": len(critical_findings)
+                      })
+                  }
+                  
+              except Exception as e:
+                  logger.error(f"Lambda execution error: {str(e)}")
+                  return {"statusCode": 500, "body": f"Error: {str(e)}"}
+          EOF
+
+          # Create deployment package
+          zip lambda-deployment.zip lambda_function.py
+          
+          # Deploy or update Lambda function
+          FUNCTION_NAME="security-critical-findings-${{ inputs.service_name }}-${{ inputs.environment }}"
+          
+          # Check if function exists
+          if aws lambda get-function --function-name $FUNCTION_NAME 2>/dev/null; then
+            # Update existing function
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://lambda-deployment.zip
+          else
+            # Create new function
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.12 \
+              --role ${{ secrets.lambda_deployment_role }} \
+              --handler lambda_function.lambda_handler \
+              --zip-file fileb://lambda-deployment.zip \
+              --environment Variables="{ALERT_TOPIC_ARN=${{ inputs.alert_topic_arn }}}" \
+              --timeout 60
+          fi
+          
+          echo "lambda_function_name=$FUNCTION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Build, Tag, and Push Docker Image to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ inputs.service_name }}-${{ inputs.environment }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker tag ${{ steps.final.outputs.image }} $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+      # - name: Slack Status Notifier
+      #   if: always()
+      #   uses: ravsamhq/notify-slack-action@v2
+      #   with:
+      #     status: ${{ job.status }}
+      #     notify_when: "failure"
+      #     notification_title: '{repo}, {workflow}: {status_message}'
+      #     message_format: '{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>'
+      #     footer: 'Repo <{repo_url}|{repo}> | <{run_url}|View Run>'
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      #   outputs:
+      #     dockerImageTag: ${{ steps.vars.outputs.image_tag }}
+
+      - name: Generate IAM Policy Documentation
+        if: ${{ inputs.enable_secure_scan }}
+        run: |
+          cat > iam-policies-$(date +%Y%m%d).json << 'EOF'
+          {"SecurityScanLambdaPolicy":{"Version":"2012-10-17","Statement":[
+            {"Effect":"Allow","Action":["inspector2:GetFindings","inspector2:BatchGetFindings","inspector2:StartResourceScan"],"Resource":"*"},
+            {"Effect":"Allow","Action":["ecr:GetAuthorizationToken","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"],"Resource":"*"},
+            {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject","s3:ListBucket"],"Resource":["arn:aws:s3:::${{ inputs.s3_sbom_bucket }}","arn:aws:s3:::${{ inputs.s3_sbom_bucket }}/*"]},
+            {"Effect":"Allow","Action":["sns:Publish"],"Resource":"${{ inputs.alert_topic_arn }}"},
+            {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:*:*:*"}
+          ]},
+          "TrustPolicy":{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
+          }
+          EOF
+          
+          echo " IAM policies generated: iam-policies-$(date +%Y%m%d).json"
+          echo " Required IAM role ARN should be set in secrets.lambda_deployment_role"
+          echo " SNS topic ARN should be set in inputs.alert_topic_arn"
+
+      - name: Upload IAM Documentation Artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ inputs.enable_secure_scan }}
+        with:
+          name: iam-policies-documentation
+          path: iam-policies-*.json
+
+  deploy-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: infra-build
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs: 
+      dockerImageTag: ${{ needs.infra-build.outputs.dockerImageTag }}
+      environment: ${{ inputs.environment }}      
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws-github-oidc-iam-role }}
+          role-session-name: GhActionRoleSession
+          aws-region: eu-west-2
+
+      - name: Install kubectl and Helm
+        run: |
+          VERSION=$(curl --silent https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+          curl -LO https://storage.googleapis.com/kubernetes-release/release/$VERSION/bin/linux/amd64/kubectl
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Clone Action Repo
+        uses: actions/checkout@v4
+        with:
+          repository: occasio/gh-actions
+          token: ${{ secrets.github-token }}
+
+      - name: RenameValuesFile
+        run: |
+          rm -rf services/app-chart/default.values.yaml
+
+      - name: Clean memory_limit input
+        id: clean_memory_limit
+        run: |
+          CLEANED_MEMORY=$(echo "${{ inputs.memory_limit }}" | sed 's/[^0-9]*//g')
+          CRON_CLEANED_MEMORY=$(echo "${{ inputs.cron_memory_limit }}" | sed 's/[^0-9]*//g')
+          echo "clean_memory_limit=$CLEANED_MEMORY" >> $GITHUB_OUTPUT
+          echo "cron_clean_memory_limit=$CRON_CLEANED_MEMORY" >> $GITHUB_OUTPUT
+
+      - name: Generate Helm values.yaml
+        run: |
+          cat <<EOF > values.yaml
+            service_name: "${{ inputs.service_name }}"
+            environment: "${{ inputs.environment }}"
+            organization: "${{ inputs.organization }}"
+            cron: "${{ inputs.cron }}"
+            enable_tf: "${{ inputs.enable_tf }}"
+            enable_ingress: ${{ inputs.enable_ingress }}
+            enable_status_cake: ${{ inputs.enable_status_cake }}
+            route53_zoneid: "${{ inputs.route53_zoneid }}"
+            replicas: "${{ inputs.replicas }}"
+            hpa_max_replicas: "${{ inputs.hpa_max_replicas }}"
+            memory_limit: "${{ steps.clean_memory_limit.outputs.clean_memory_limit }}"
+            cpu_limit: "${{ inputs.cpu_limit }}"
+            cron_memory_limit: "${{ steps.clean_memory_limit.outputs.cron_clean_memory_limit }}"
+            cron_cpu_limit: "${{ inputs.cron_cpu_limit }}"
+            monitor_name: "${{ inputs.monitor_name }}"
+            app_url: "${{ inputs.app_url }}"
+            k8_ingress_url: "${{ inputs.k8_ingress_url }}"
+            ingress_group: "${{ inputs.ingress_group }}"
+            health_check_path: "${{ inputs.health_check_path }}"
+            hpa_enabled: ${{ inputs.hpa_enabled }}
+            services_allowed:  ${{ inputs.services_allowed }}
+            enable_secure_scan: ${{ inputs.enable_secure_scan }}
+            burstable: ${{ inputs.burstable }}
+            enable_sentry: ${{ inputs.enable_sentry }}
+          EOF
+
+      - name: Lint Helm Chart
+        run: |
+          helm lint services/app-chart --set service_name=${{ inputs.service_name }} --set environment=${{ inputs.environment }} --set cron=${{ inputs.cron }} --set enable_ingress=${{ inputs.enable_ingress }} --set replicas=${{ inputs.replicas }} --set hpa_max_replicas=${{ inputs.hpa_max_replicas }} --set memory_limit=${{ inputs.memory_limit }} --set cpu_limit=${{ inputs.cpu_limit }}
+      - name: Deploy App
+        env:
+          IMAGE_TAG: ${{ needs.infra-build.outputs.dockerImageTag }}
+        run: |
+          aws eks update-kubeconfig --name ${{ inputs.environment }} --region eu-west-2
+          helm upgrade -i ${{ inputs.service_name }} services/app-chart \
+            --set service_name=${{ inputs.service_name }} \
+            --set environment=${{ inputs.environment }} \
+            --set cron=${{ inputs.cron }} \
+            --set enable_ingress=${{ inputs.enable_ingress }} \
+            --set replicas=${{ inputs.replicas }} \
+            --set hpa_max_replicas=${{ inputs.hpa_max_replicas }} \
+            --set burstable=${{ inputs.burstable }} \
+            --set cron_memory_limit=${{ steps.clean_memory_limit.outputs.cron_clean_memory_limit }} \
+            --set cron_cpu_limit=${{ inputs.cron_cpu_limit }} \
+            --set memory_limit=${{ steps.clean_memory_limit.outputs.clean_memory_limit }} \
+            --set cpu_limit=${{ inputs.cpu_limit }} \
+            --set app_url=${{ inputs.app_url }} \
+            --set health_check_path=${{ inputs.health_check_path }} \
+            --set hpa_enabled=${{ inputs.hpa_enabled }} \
+            --set image_tag=$IMAGE_TAG \
+            --set-json 'services_allowed=${{ inputs.services_allowed }}'
+          kubectl rollout status deployment/${{ inputs.service_name }}-${{ inputs.environment }}
+          if [[ "${{inputs.cron}}" == "true" ]]; then
+            kubectl rollout status deployment/${{ inputs.service_name }}-${{ inputs.environment }}-cron
+          fi
+
+      # - name: Slack Status Notifier
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #   if: always()
+      #   uses: ravsamhq/notify-slack-action@v2
+      #   with:
+      #     status: ${{ job.status }}
+      #     notify_when: "failure"
+      #     notification_title: '{repo}, {workflow}: {status_message}'
+      #     message_format: '{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>'
+      #     footer: 'Repo <{repo_url}|{repo}> | <{run_url}|View Run>'
+
+
+  sentry-release:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.enable_sentry }}
+    timeout-minutes: 8
+    needs: [deploy-app]
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Sentry Release
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.sentry_auth_token }}
+          SENTRY_ORG: ${{ inputs.organization }}
+          SENTRY_PROJECT: ${{ inputs.service_name }}
+          VERSION: ${{ needs.deploy-app.outputs.dockerImageTag }}-${{ inputs.environment }}
+        run: |
+          curl -sL https://sentry.io/get-cli/ | SENTRY_CLI_VERSION="2.2.0" bash
+          sentry-cli releases new "$VERSION"
+          sentry-cli releases set-commits "$VERSION" --auto
+          sentry-cli releases finalize "$VERSION"
+
+      - name: Tag Deployment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_TAG: ${{ needs.deploy-app.outputs.dockerImageTag }}
+          ENVIRONMENT: ${{ needs.deploy-app.outputs.environment }}
+        run: |
+          git tag $ENVIRONMENT-$DEPLOY_TAG
+          git push origin $ENVIRONMENT-$DEPLOY_TAG
+
+      # - name: Slack Status Notifier
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #   if: always()
+      #   uses: ravsamhq/notify-slack-action@v2
+      #   with:
+      #     status: ${{ job.status }}
+      #     notification_title: 'Deployment {status_message} for <{repo_url}|{repo}>, ${{ inputs.environment }}'
+      #     message_format: '{emoji}, Branch: <{branch_url}|{branch}>, External URL: ${{ inputs.app_url }} Internal k8s URL: ${{ inputs.service_name }}-${{ inputs.environment }}.default.svc.cluster.local'
+      #     footer: 'Author: ${{ github.event.head_commit.author.name }} | <{run_url}|View Pipeline>'
