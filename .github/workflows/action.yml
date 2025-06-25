@@ -360,6 +360,10 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date +%Y%m%d-%H%M)
           PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
+
+          # Install wkhtmltopdf
+          sudo apt-get update
+          sudo apt-get install -y wkhtmltopdf
           
           # Create simple HTML report directly
           cat > sbom_report.html << 'EOF'
