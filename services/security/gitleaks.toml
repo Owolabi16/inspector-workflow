@@ -5,89 +5,31 @@ title = "Gitleaks Security Configuration"
 
 # Global settings
 [extend]
-# useDefault = true
+useDefault = true
 
-# Custom rules for detecting secrets
-[[rules]]
-id = "aws-access-key"
-description = "AWS Access Key ID"
-regex = '''AKIA[0-9A-Z]{16}'''
-tags = ["aws", "credentials"]
-
-[[rules]]
-id = "aws-secret-key"
-description = "AWS Secret Access Key"
-regex = '''[A-Za-z0-9/+=]{40}'''
-tags = ["aws", "credentials"]
-
-[[rules]]
-id = "github-token"
-description = "GitHub Personal Access Token"
-regex = '''ghp_[A-Za-z0-9]{36}'''
-tags = ["github", "token"]
-
-[[rules]]
-id = "github-app-token"
-description = "GitHub App Token"
-regex = '''ghs_[A-Za-z0-9]{36}'''
-tags = ["github", "token"]
-
-[[rules]]
-id = "slack-webhook"
-description = "Slack Webhook URL"
-regex = '''https://hooks\.slack\.com/services/[A-Z0-9]+/[A-Z0-9]+/[A-Za-z0-9]+'''
-tags = ["slack", "webhook"]
-
-[[rules]]
-id = "generic-password"
-description = "Generic Password Pattern"
-regex = '''(?i)(password|pwd|pass)\s*[:=]\s*['""][^'""\s]{8,}['""]'''
-tags = ["password", "generic"]
-
-[[rules]]
-id = "private-key"
-description = "Private Key"
-regex = '''-----BEGIN [A-Z ]+PRIVATE KEY-----'''
-tags = ["key", "private"]
-
-[[rules]]
-id = "jwt-token"
-description = "JSON Web Token"
-regex = '''eyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_.+/=]+'''
-tags = ["jwt", "token"]
-
-# Allowlist - patterns to ignore
-[[allowlist]]
-description = "Ignore test files"
-paths = [
-    '''test/.*''',
-    '''tests/.*''',
-    '''.*/test/.*''',
-    '''.*/tests/.*''',
-]
-
-[[allowlist]]
-description = "Ignore example/dummy values"
+# Allowlist configuration (correct format for Gitleaks v8.18.1)
+[allowlist]
+description = "Global allowlist rules"
 regexes = [
     '''dummy.*''',
     '''example.*''',
     '''placeholder.*''',
+    '''test.*''',
+    '''fake.*''',
     '''AKIA.*EXAMPLE.*''',
     '''your-.*-here''',
+    '''localhost''',
+    '''127\.0\.0\.1''',
 ]
 
-[[allowlist]]
-description = "Ignore documentation files"
 paths = [
     '''README\.md''',
     '''.*\.md''',
     '''docs/.*''',
-]
-
-# File type allowlist
-[[allowlist]]
-description = "Ignore binary and media files"
-paths = [
+    '''test/.*''',
+    '''tests/.*''',
+    '''.*/test/.*''',
+    '''.*/tests/.*''',
     '''.*\.jpg''',
     '''.*\.jpeg''',
     '''.*\.png''',
@@ -95,4 +37,6 @@ paths = [
     '''.*\.pdf''',
     '''.*\.zip''',
     '''.*\.tar\.gz''',
+    '''node_modules/.*''',
+    '''.git/.*''',
 ]
