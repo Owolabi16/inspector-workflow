@@ -354,74 +354,74 @@ jobs:
           sudo mv cyclonedx /usr/local/bin/
 
       - name: Convert SBOM to PDF using Python
-              if: ${{ inputs.enable_secure_scan && steps.inspector_scan.outcome == 'success' }}
-              id: sbom_pdf
-              run: |
-                SHORT_SHA=$(git rev-parse --short HEAD)
-                TIMESTAMP=$(date +%Y%m%d-%H%M)
-                PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
-                
-                # Create simple HTML report directly
-                cat > sbom_report.html << 'EOF'
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Security Report</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        .header { background: lightblue; padding: 20px; border-radius: 5px; }
-                        .section { margin: 20px 0; padding: 15px; border: 1px solid gray; }
-                        .json { background: lightgray; padding: 10px; font-family: monospace; font-size: 12px; }
-                        h1 { color: darkblue; }
-                        h2 { color: darkgreen; }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>Security Analysis Report</h1>
-                        <p><strong>Service:</strong> SERVICE_PLACEHOLDER</p>
-                        <p><strong>Generated:</strong> TIMESTAMP_PLACEHOLDER</p>
-                    </div>
-                    
-                    <div class="section">
-                        <h2>Software Bill of Materials</h2>
-                        <div class="json" id="sbom-content">Loading SBOM...</div>
-                    </div>
-                    
-                    <div class="section">
-                        <h2>Security Scan Results</h2>
-                        <div class="json" id="scan-content">Loading scan results...</div>
-                    </div>
-                </body>
-                </html>
-                EOF
-                
-                # Replace placeholders in HTML
-                sed -i "s/SERVICE_PLACEHOLDER/${{ inputs.service_name }}-${{ inputs.environment }}/g" sbom_report.html
-                sed -i "s/TIMESTAMP_PLACEHOLDER/$(date)/g" sbom_report.html
-                
-                # Add SBOM content
-                echo '<div class="json">' >> temp_sbom.html
-                cat sbom_output.json | jq . >> temp_sbom.html 2>/dev/null || cat sbom_output.json >> temp_sbom.html
-                echo '</div>' >> temp_sbom.html
-                sed -i '/Loading SBOM.../r temp_sbom.html' sbom_report.html
-                sed -i '/Loading SBOM.../d' sbom_report.html
-                
-                # Add scan results content
-                echo '<div class="json">' >> temp_scan.html
-                cat inspector_scan_output.json | jq . >> temp_scan.html 2>/dev/null || cat inspector_scan_output.json >> temp_scan.html
-                echo '</div>' >> temp_scan.html
-                sed -i '/Loading scan results.../r temp_scan.html' sbom_report.html
-                sed -i '/Loading scan results.../d' sbom_report.html
-                
-                # Clean up temp files
-                rm -f temp_sbom.html temp_scan.html
-                
-                # Convert HTML to PDF
-                wkhtmltopdf --page-size A4 sbom_report.html "${PDF_NAME}"
-                
-                echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
-                echo "✅ SBOM PDF generated: ${PDF_NAME}"        
+        if: ${{ inputs.enable_secure_scan && steps.inspector_scan.outcome == 'success' }}
+        id: sbom_pdf
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d-%H%M)
+          PDF_NAME="sbom-${{ inputs.service_name }}-${{ inputs.environment }}-${SHORT_SHA}-${TIMESTAMP}.pdf"
+          
+          # Create simple HTML report directly
+          cat > sbom_report.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Security Report</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 20px; }
+                  .header { background: lightblue; padding: 20px; border-radius: 5px; }
+                  .section { margin: 20px 0; padding: 15px; border: 1px solid gray; }
+                  .json { background: lightgray; padding: 10px; font-family: monospace; font-size: 12px; }
+                  h1 { color: darkblue; }
+                  h2 { color: darkgreen; }
+              </style>
+          </head>
+          <body>
+              <div class="header">
+                  <h1>Security Analysis Report</h1>
+                  <p><strong>Service:</strong> SERVICE_PLACEHOLDER</p>
+                  <p><strong>Generated:</strong> TIMESTAMP_PLACEHOLDER</p>
+              </div>
+              
+              <div class="section">
+                  <h2>Software Bill of Materials</h2>
+                  <div class="json" id="sbom-content">Loading SBOM...</div>
+              </div>
+              
+              <div class="section">
+                  <h2>Security Scan Results</h2>
+                  <div class="json" id="scan-content">Loading scan results...</div>
+              </div>
+          </body>
+          </html>
+          EOF
+          
+          # Replace placeholders in HTML
+          sed -i "s/SERVICE_PLACEHOLDER/${{ inputs.service_name }}-${{ inputs.environment }}/g" sbom_report.html
+          sed -i "s/TIMESTAMP_PLACEHOLDER/$(date)/g" sbom_report.html
+          
+          # Add SBOM content
+          echo '<div class="json">' >> temp_sbom.html
+          cat sbom_output.json | jq . >> temp_sbom.html 2>/dev/null || cat sbom_output.json >> temp_sbom.html
+          echo '</div>' >> temp_sbom.html
+          sed -i '/Loading SBOM.../r temp_sbom.html' sbom_report.html
+          sed -i '/Loading SBOM.../d' sbom_report.html
+          
+          # Add scan results content
+          echo '<div class="json">' >> temp_scan.html
+          cat inspector_scan_output.json | jq . >> temp_scan.html 2>/dev/null || cat inspector_scan_output.json >> temp_scan.html
+          echo '</div>' >> temp_scan.html
+          sed -i '/Loading scan results.../r temp_scan.html' sbom_report.html
+          sed -i '/Loading scan results.../d' sbom_report.html
+          
+          # Clean up temp files
+          rm -f temp_sbom.html temp_scan.html
+          
+          # Convert HTML to PDF
+          wkhtmltopdf --page-size A4 sbom_report.html "${PDF_NAME}"
+          
+          echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+          echo "✅ SBOM PDF generated: ${PDF_NAME}"        
 
 
       - name: Upload SBOM and PDF to S3
