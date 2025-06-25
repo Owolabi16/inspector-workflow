@@ -1,18 +1,12 @@
 FROM node:18-alpine
 
-# Create app directory
 WORKDIR /usr/src/app
 
-# Copy package files
+# Copy package files and install
 COPY package*.json ./
+RUN npm install --production
 
-# Install dependencies
-ARG NPM_TOKEN
-RUN echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc && \
-    npm ci --only=production && \
-    rm -f .npmrc
-
-# Copy application code
+# Copy app source
 COPY . .
 
 # Expose port
@@ -20,7 +14,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Start application
+# Start app
 CMD ["npm", "start"]
