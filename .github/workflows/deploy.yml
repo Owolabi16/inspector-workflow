@@ -33,5 +33,5 @@ jobs:
       health_check_path: "/health"
       enable_secure_scan: true
       enable_critical_only_alerts: true
-      sbom_bucket_name: ${{ secrets.SBOM_BUCKET_NAME }}
-      alert_topic_arn: ${{ secrets.ALERT_TOPIC_ARN }}
+      sbom_bucket_name: "sbom-bucket-new"
+      alert_topic_arn: ${{ vars.ALERT_TOPIC_ARN }}
