@@ -126,7 +126,7 @@ on:
         type: string
         default: "your-org-sbom-artifacts"
       alert_topic_arn:
-        description: SNS topic ARN for security alerts
+        description: SNS topic ARN for security alerts.
         required: false
         type: string        
 
@@ -584,7 +584,7 @@ jobs:
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
           curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          
+
       - name: Clone Action Repo
         uses: actions/checkout@v4
 
