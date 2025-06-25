@@ -311,24 +311,24 @@ jobs:
           ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
           TAG: ${{ steps.vars.outputs.image_tag }}
 
-      - name: Select final image tag
-        id: final
+      - name: Prepare Image for Security Scanning
+        id: prepare_scan
         run: |
-          if [[ "${{ steps.vulns.outputs.crit }}" != "0" && "${{ steps.copa.conclusion }}" == "success" ]]; then
-            echo "image=${{ steps.copa.outputs.patched-image }}" >> $GITHUB_OUTPUT
+          # Use the base image that we know exists
+          SCAN_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}:${{ steps.vars.outputs.image_tag }}-patch"
+          
+          echo "🔍 Checking if scan image exists: $SCAN_IMAGE"
+          if docker image inspect "$SCAN_IMAGE" >/dev/null 2>&1; then
+            echo "✅ Scan image found"
+            docker save "$SCAN_IMAGE" -o ./container-image.tar
+            ls -la ./container-image.tar
+            echo "scan_image=$SCAN_IMAGE" >> $GITHUB_OUTPUT
+            echo "✅ Image prepared for scanning"
           else
-            echo "image=${{ env.ECR_URI }}:${{ env.TAG }}" >> $GITHUB_OUTPUT
-          fi
-        env:
-          ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
-          TAG: ${{ steps.vars.outputs.image_tag }}
-
-      - name: Save Final Image as Tarball for Inspector Scan
-        run: |
-          echo "Saving final image for security scan: ${{ steps.final.outputs.image }}"
-          docker save ${{ steps.final.outputs.image }} -o ./container-image.tar
-          ls -la ./container-image.tar
-          echo "Image saved as tarball for local scanning"          
+            echo "❌ Scan image not found, available images:"
+            docker images | grep "${{ inputs.service_name }}" || echo "No matching images"
+            exit 1
+          fi        
 
       - name: Scan with AWS Inspector and Generate SBOM
         id: inspector_scan
