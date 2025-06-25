@@ -1,0 +1,17 @@
+{
+  "name": "security-test-app",
+  "version": "1.0.0",
+  "description": "Test application for security pipeline",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "helmet": "^6.1.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
