@@ -6,6 +6,9 @@ on:
 
 jobs:
   deploy:
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/action.yml
     secrets:
       aws-github-oidc-iam-role: ${{ secrets.AWS_GITHUB_OIDC_IAM_ROLE }}
@@ -32,5 +35,5 @@ jobs:
       health_check_path: "/health"
       enable_secure_scan: true
       enable_critical_only_alerts: true
-      sbom_bucket_name: "sbom-bucket-new"
+      sbom_bucket_name: ${{ vars.SBON_BUCKET_NAME }}
       alert_topic_arn: ${{ vars.ALERT_TOPIC_ARN }}
