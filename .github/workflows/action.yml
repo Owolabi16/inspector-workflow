@@ -15,8 +15,6 @@ on:
         required: true
       lambda_deployment_role:
         required: false
-      sbom_bucket_name:
-        required: false
     inputs:
       environment:
         description: Environment name Staging or Prod

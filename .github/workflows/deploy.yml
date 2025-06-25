@@ -11,7 +11,6 @@ jobs:
       aws-github-oidc-iam-role: ${{ secrets.AWS_GITHUB_OIDC_IAM_ROLE }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
       lambda_deployment_role: ${{ secrets.LAMBDA_DEPLOYMENT_ROLE }}
-      sbom_bucket_name: ${{ secrets.SBOM_BUCKET_NAME }}
       # slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
       # npm_token: ${{ secrets.NPM_TOKEN }}
       # tfc_token: ${{ secrets.TFC_TOKEN }}
