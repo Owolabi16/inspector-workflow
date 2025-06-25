@@ -424,18 +424,18 @@ with open('sbom_report.html', 'w') as f:
 
 print("✅ HTML report generated successfully")
 PYTHON_SCRIPT
-    
-    # Run Python script with environment variables
-    SERVICE_NAME="${{ inputs.service_name }}" \
-    ENVIRONMENT="${{ inputs.environment }}" \
-    SHORT_SHA="${SHORT_SHA}" \
-    python3 generate_report.py
-    
-    # Convert HTML to PDF
-    wkhtmltopdf --page-size A4 --orientation Portrait sbom_report.html "${PDF_NAME}"
-    
-    echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
-    echo "✅ SBOM PDF generated: ${PDF_NAME}"          
+          
+          # Run Python script with environment variables
+          SERVICE_NAME="${{ inputs.service_name }}" \
+          ENVIRONMENT="${{ inputs.environment }}" \
+          SHORT_SHA="${SHORT_SHA}" \
+          python3 generate_report.py
+          
+          # Convert HTML to PDF
+          wkhtmltopdf --page-size A4 --orientation Portrait sbom_report.html "${PDF_NAME}"
+          
+          echo "pdf_name=${PDF_NAME}" >> $GITHUB_OUTPUT
+          echo "✅ SBOM PDF generated: ${PDF_NAME}"          
 
 
       - name: Upload SBOM and PDF to S3
