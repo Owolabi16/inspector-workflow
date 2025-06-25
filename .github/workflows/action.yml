@@ -137,9 +137,6 @@ jobs:
     steps:
       - name: Clone Action Repo
         uses: actions/checkout@v4
-        with:
-          repository: occasio/gh-actions
-          token: ${{ secrets.github-token }}
 
       - name: Validate Inputs Temp Folder
         run: |
@@ -169,9 +166,6 @@ jobs:
     steps:
       - name: Clone Action Repo
         uses: actions/checkout@v4
-        with:
-          repository: occasio/gh-actions
-          token: ${{ secrets.github-token }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -590,11 +584,9 @@ jobs:
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
           curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          
       - name: Clone Action Repo
         uses: actions/checkout@v4
-        with:
-          repository: occasio/gh-actions
-          token: ${{ secrets.github-token }}
 
       - name: RenameValuesFile
         run: |
