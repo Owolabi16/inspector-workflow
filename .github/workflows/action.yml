@@ -275,8 +275,6 @@ jobs:
           context: .
           push: false
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}:${{ steps.vars.outputs.image_tag }}-patch
-          build-args: |
-            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
         env:
           ECR_URI: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}
           TAG: ${{ steps.vars.outputs.image_tag }}
@@ -285,7 +283,7 @@ jobs:
         id: trivy
         uses: aquasecurity/trivy-action@0.31.0
         with:
-          image-ref: $ECR_URI:$TAG-patch
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.service_name }}-${{ inputs.environment }}:${{ steps.vars.outputs.image_tag }}-patch
           scan-type: image
           format: json
           output: trivy-report.json
