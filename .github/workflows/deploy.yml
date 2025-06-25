@@ -24,8 +24,9 @@ jobs:
       service_name: "security-test-app"
       organization: "occasio"
       enable_tf: "false"
-      enable_ingress: true
-      enable_status_cake: false
+      enable_ingress: "false"
+      enable_status_cake: "false"
+      enable_sentry: "false"
       replicas: "1"
       hpa_max_replicas: "2"
       memory_limit: "256Mi"

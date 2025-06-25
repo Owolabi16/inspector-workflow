@@ -662,6 +662,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     needs: infra-build
+    if: ${{ inputs.enable_ingress == true }}
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
@@ -775,7 +776,7 @@ jobs:
 
   sentry-release:
     runs-on: ubuntu-latest
-    if: ${{ inputs.enable_sentry }}
+    if: ${{ inputs.enable_sentry == true }}
     timeout-minutes: 8
     needs: [deploy-app]
     steps:
